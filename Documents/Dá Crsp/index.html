@@ -1189,6 +1189,29 @@
   </div>
 </div>
 
+<!-- Order Status Modal -->
+<div class="modal" id="orderStatusModal">
+  <div class="modal-content" style="max-width: 500px;">
+    <div class="modal-header">
+      <h3>Order Status Check 📋</h3>
+      <button class="close-modal" onclick="closeOrderStatusModal()">×</button>
+    </div>
+    <div style="padding: 20px;">
+      <p style="margin-bottom: 20px; color: var(--text-light);">
+        We noticed you sent an order to WhatsApp. Did you complete your purchase?
+      </p>
+      <div id="pendingOrderDetails" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem;">
+        <!-- Order details will be populated here -->
+      </div>
+      <div style="display: flex; gap: 10px; flex-direction: column;">
+        <button class="checkout-btn" onclick="markOrderCompleted()" style="width: 100%;">✅ Yes, I completed the order</button>
+        <button class="btn-secondary" onclick="needOrderGuidance()" style="width: 100%; border-color: var(--accent); color: var(--accent);">❓ I need guidance</button>
+        <button class="btn-secondary" onclick="remindLater()" style="width: 100%;">⏰ Remind me later</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   // SUPABASE CONFIG
   const SUPABASE_URL = 'https://wkgpfdszpfavgngbeupu.supabase.co';
@@ -1252,13 +1275,103 @@
       document.getElementById('userSection').style.display = 'flex';
       document.getElementById('userEmail').innerText = user.email.split('@')[0];
       if(document.getElementById('deliveryName')) document.getElementById('deliveryName').value = user.email.split('@')[0];
+
+      // Check for pending WhatsApp orders
+      await checkPendingOrders(user.id);
     } else {
       document.getElementById('authSection').style.display = 'block';
       document.getElementById('userSection').style.display = 'none';
     }
   }
 
-  async function handleLogout() { await _supabase.auth.signOut(); location.reload(); }
+  async function checkPendingOrders(userId) {
+    try {
+      const { data, error } = await _supabase
+        .from('orders')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'sent_to_whatsapp')
+        .eq('order_completed', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        const pendingOrder = data[0];
+        showOrderStatusModal(pendingOrder);
+      }
+    } catch (e) {
+      console.error('Error checking pending orders:', e);
+    }
+  }
+
+  function showOrderStatusModal(order) {
+    const modal = document.getElementById('orderStatusModal');
+    const detailsDiv = document.getElementById('pendingOrderDetails');
+
+    const itemsText = order.items.map(item => `${item.name} (${item.qty})`).join(', ');
+    const orderDate = new Date(order.created_at).toLocaleDateString();
+
+    detailsDiv.innerHTML = `
+      <strong>Order Date:</strong> ${orderDate}<br>
+      <strong>Items:</strong> ${itemsText}<br>
+      <strong>Total:</strong> ₹${order.total_amount}<br>
+      <strong>Delivery:</strong> ${order.wing} Wing, Room ${order.room}
+    `;
+
+    // Store order ID for later use
+    modal.dataset.orderId = order.id;
+    modal.classList.add('active');
+  }
+
+  function closeOrderStatusModal() {
+    document.getElementById('orderStatusModal').classList.remove('active');
+  }
+
+  async function markOrderCompleted() {
+    const orderId = document.getElementById('orderStatusModal').dataset.orderId;
+    try {
+      const { error } = await _supabase
+        .from('orders')
+        .update({ order_completed: true, status: 'completed' })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      showToast('🎉 Order marked as completed!');
+      closeOrderStatusModal();
+    } catch (e) {
+      console.error('Error updating order:', e);
+      showToast('❌ Failed to update order status');
+    }
+  }
+
+  async function needOrderGuidance() {
+    const orderId = document.getElementById('orderStatusModal').dataset.orderId;
+    try {
+      // Update order status to indicate user needs guidance
+      const { error } = await _supabase
+        .from('orders')
+        .update({ status: 'needs_guidance' })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      showToast('📞 Our team will contact you soon!');
+      closeOrderStatusModal();
+
+      // Here you could also send a notification or trigger customer support
+    } catch (e) {
+      console.error('Error updating order:', e);
+      showToast('❌ Failed to request guidance');
+    }
+  }
+
+  function remindLater() {
+    showToast('⏰ We\'ll ask again next time you login');
+    closeOrderStatusModal();
+  }
 
   // Apply theme
   function applyTheme(mood) {
@@ -1566,10 +1679,10 @@
   }
   async function placeOrder() {
     // 1. LOGIN CHECK (Keep this - it is correct!)
-    if (!currentUser) { 
-      showToast('❌ Login to place order'); 
-      openAuthModal(); 
-      return; 
+    if (!currentUser) {
+      showToast('❌ Login to place order');
+      openAuthModal();
+      return;
     }
 
     // 2. COLLECT DATA FROM FORM
@@ -1577,22 +1690,43 @@
     const phone = document.getElementById('deliveryPhone').value;
     const wing = document.getElementById('deliveryWing').value;
     const room = document.getElementById('deliveryRoom').value;
-    
+
     // Simple Validation
-    if (!name || !phone || !wing || !room) { 
-      showToast('❌ Fill delivery details'); 
-      return; 
+    if (!name || !phone || !wing || !room) {
+      showToast('❌ Fill delivery details');
+      return;
     }
-    if (cart.length === 0) { 
-      showToast('❌ Cart is empty'); 
-      return; 
+    if (cart.length === 0) {
+      showToast('❌ Cart is empty');
+      return;
     }
-    
-    // 3. GENERATE WHATSAPP MESSAGE
+
     const total = cart.reduce((s, i) => s + (i.price * i.qty), 0);
-    const itemsText = cart.map(item => `${item.name} (${item.qty})`).join(', ');
-    
-    const message = `Hi i would like to order ${itemsText}. 
+
+    try {
+      // 3. SAVE ORDER TO DATABASE WITH PENDING STATUS
+      const { data, error } = await _supabase
+        .from('orders')
+        .insert([
+          {
+            user_id: currentUser.id,
+            user_name: name,
+            phone: phone,
+            wing: wing,
+            room: room,
+            items: cart,
+            total_amount: total,
+            status: 'sent_to_whatsapp', // New status for WhatsApp orders
+            order_completed: false // Track if order was actually completed
+          }
+        ]);
+
+      if (error) throw error;
+
+      // 4. GENERATE WHATSAPP MESSAGE
+      const itemsText = cart.map(item => `${item.name} (${item.qty})`).join(', ');
+
+      const message = `Hi i would like to order ${itemsText}.
 Delivery Details:
 Name: ${name}
 Phone: ${phone}
@@ -1600,21 +1734,26 @@ Wing: ${wing}
 Room: ${room}
 Total: ₹${total}`;
 
-    // 4. ENCODE MESSAGE AND CREATE WHATSAPP URL
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappNumber = '919876543210'; // Replace with your actual WhatsApp business number (without +)
-    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
-    
-    // 5. REDIRECT TO WHATSAPP
-    showToast('📱 Redirecting to WhatsApp...');
-    setTimeout(() => {
-      window.open(whatsappUrl, '_blank');
-      // Clear cart and close modal after redirect
-      cart = []; 
-      updateCartUI(); 
-      closeModal();
-      showToast('✅ Order sent via WhatsApp!');
-    }, 1000);
+      // 5. ENCODE MESSAGE AND CREATE WHATSAPP URL
+      const encodedMessage = encodeURIComponent(message);
+      const whatsappNumber = '919876543210'; // Replace with your actual WhatsApp business number (without +)
+      const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
+
+      // 6. REDIRECT TO WHATSAPP
+      showToast('📱 Redirecting to WhatsApp...');
+      setTimeout(() => {
+        window.open(whatsappUrl, '_blank');
+        // Clear cart and close modal after redirect
+        cart = [];
+        updateCartUI();
+        closeModal();
+        showToast('✅ Order sent via WhatsApp!');
+      }, 1000);
+
+    } catch (e) {
+      console.error('Order Error:', e);
+      showToast('❌ Failed to save order');
+    }
   }
   
   async function filterByCategory(category) {
