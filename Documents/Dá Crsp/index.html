@@ -1165,7 +1165,7 @@
 <div class="modal" id="checkoutModal">
   <div class="modal-content">
     <div class="modal-header">
-      <h3>Your Cart 🛒</h3>
+      <h3>Order via WhatsApp 💬</h3>
       <button class="close-modal" onclick="closeModal()">×</button>
     </div>
     <div id="cartItems"></div>
@@ -1185,7 +1185,7 @@
     <button class="btn-secondary" style="width: 100%; margin-bottom: 10px; border-color: var(--accent); color: var(--accent);" onclick="saveCurrentCart()">
         💾 Save this list for later
     </button>
-    <button class="checkout-btn" onclick="placeOrder()">Place Order 💳</button>
+    <button class="checkout-btn" onclick="placeOrder()">Order via WhatsApp 💬</button>
   </div>
 </div>
 
@@ -1588,42 +1588,34 @@
       return; 
     }
     
+    // 3. GENERATE WHATSAPP MESSAGE
     const total = cart.reduce((s, i) => s + (i.price * i.qty), 0);
+    const itemsText = cart.map(item => `${item.name} (${item.qty})`).join(', ');
+    
+    const message = `Hi i would like to order ${itemsText}. 
+Delivery Details:
+Name: ${name}
+Phone: ${phone}
+Wing: ${wing}
+Room: ${room}
+Total: ₹${total}`;
 
-    try {
-      // 3. THE IDENTITY CHECK (Requirement 4)
-      // We send the 'user_id' so the profile page knows these snacks belong to this user
-      const { data, error } = await _supabase
-        .from('orders') 
-        .insert([
-          { 
-            user_id: currentUser.id, // <--- THIS IDENTIFIES THE USER
-            user_name: name,
-            phone: phone,
-            wing: wing,
-            room: room,
-            items: cart, 
-            total_amount: total,
-            status: 'placed'
-          }
-        ]);
-
-      if (error) throw error;
-
-      // 4. SUCCESS ACTIONS
-      showToast(`🎉 Order placed! Check your Profile.`);
+    // 4. ENCODE MESSAGE AND CREATE WHATSAPP URL
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappNumber = '919876543210'; // Replace with your actual WhatsApp business number (without +)
+    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodedMessage}`;
+    
+    // 5. REDIRECT TO WHATSAPP
+    showToast('📱 Redirecting to WhatsApp...');
+    setTimeout(() => {
+      window.open(whatsappUrl, '_blank');
+      // Clear cart and close modal after redirect
       cart = []; 
       updateCartUI(); 
-      closeModal(); 
-      
-      // Refresh the leaderboard if it exists
-      if (typeof loadLeaderboard === "function") loadLeaderboard();
-
-    } catch (e) {
-      console.error('Order Error:', e);
-      showToast('❌ Failed to save order to database');
-    }
-}
+      closeModal();
+      showToast('✅ Order sent via WhatsApp!');
+    }, 1000);
+  }
   
   async function filterByCategory(category) {
     try {
