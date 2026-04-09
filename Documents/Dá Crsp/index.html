@@ -417,6 +417,35 @@
     }
     .product-card:hover .product-img { background: rgba(0,0,0,0.35); }
 
+    .favorite-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.3);
+      border: none;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .favorite-btn:hover {
+      background: rgba(0,0,0,0.5);
+      transform: scale(1.1);
+    }
+
+    .favorite-btn.favorited {
+      background: rgba(255,107,43,0.8);
+      box-shadow: 0 0 10px rgba(255,107,43,0.3);
+    }
+
     .product-badge {
       position: absolute;
       top: 12px; left: 12px;
@@ -890,6 +919,7 @@
   <a class="logo" href="#">Dá Crsp 🍜</a>
   <ul class="nav-links">
     <li><a href="#menu">Menu</a></li>
+    <li id="favoritesNav" style="display: none;"><a href="#favorites" onclick="showFavorites()">❤️ Favorites</a></li>
     <li><a href="#bundles">Bundles</a></li>
     <li><a href="#features">Features</a></li>
     <li><a href="#refer">Leaderboard</a></li>
@@ -960,6 +990,17 @@
   <div class="section-title">Everything Your Hostel Needs</div>
   <p class="section-sub">From pre-exam energy boosts to 3AM munchies — all packed snacks, ready to eat.</p>
   <div class="categories-grid" id="categoriesGrid"></div>
+</div>
+
+<!-- Favorites Section -->
+<div class="section" id="favorites" style="display: none;">
+  <div class="section-tag">❤️ Your Favorites</div>
+  <div class="section-title">My Favorite Snacks</div>
+  <p class="section-sub">Your personally curated snack collection</p>
+  <div class="favorites-grid" id="favoritesGrid"></div>
+  <div id="noFavoritesMessage" style="text-align: center; color: var(--text-soft); padding: 40px;">
+    No favorites yet! Click the 🤍 heart on any snack to add it here.
+  </div>
 </div>
 
 <!-- Menu Section -->
@@ -1228,6 +1269,7 @@
   let currentProducts = [];
   let currentCategories = [];
   let currentBundles = [];
+  let userFavorites = []; // Track user's favorite product IDs
 
   // Theme colors mapping
   const themeColors = {
@@ -1276,34 +1318,47 @@
       document.getElementById('userEmail').innerText = user.email.split('@')[0];
       if(document.getElementById('deliveryName')) document.getElementById('deliveryName').value = user.email.split('@')[0];
 
+      // Show favorites nav link
+      document.getElementById('favoritesNav').style.display = 'block';
+
+      // Load user's favorites
+      await loadUserFavorites(user.id);
+
       // Check for pending WhatsApp orders
       await checkPendingOrders(user.id);
     } else {
       document.getElementById('authSection').style.display = 'block';
       document.getElementById('userSection').style.display = 'none';
+      document.getElementById('favoritesNav').style.display = 'none';
+      userFavorites = []; // Clear favorites when logged out
+      updateFavoriteButtons(); // Update button states
     }
   }
 
-  async function checkPendingOrders(userId) {
+  async function loadUserFavorites(userId) {
     try {
       const { data, error } = await _supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', 'sent_to_whatsapp')
-        .eq('order_completed', false)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .from('favorites')
+        .select('product_id')
+        .eq('user_id', userId);
 
       if (error) throw error;
 
-      if (data && data.length > 0) {
-        const pendingOrder = data[0];
-        showOrderStatusModal(pendingOrder);
-      }
+      userFavorites = data ? data.map(fav => fav.product_id) : [];
+      updateFavoriteButtons();
     } catch (e) {
-      console.error('Error checking pending orders:', e);
+      console.error('Error loading favorites:', e);
     }
+  }
+
+  function updateFavoriteButtons() {
+    // Update all heart buttons based on current favorites
+    document.querySelectorAll('.favorite-btn').forEach(btn => {
+      const productId = btn.dataset.productId;
+      const isFavorited = userFavorites.includes(productId);
+      btn.innerHTML = isFavorited ? '❤️' : '🤍';
+      btn.classList.toggle('favorited', isFavorited);
+    });
   }
 
   function showOrderStatusModal(order) {
@@ -1371,6 +1426,71 @@
   function remindLater() {
     showToast('⏰ We\'ll ask again next time you login');
     closeOrderStatusModal();
+  }
+
+  // Favorites functions
+  async function showFavorites() {
+    if (!currentUser) {
+      showToast('❌ Login to view favorites!');
+      openAuthModal();
+      return;
+    }
+
+    // Load full favorite data and render
+    await renderFavorites();
+    document.getElementById('favorites').style.display = 'block';
+    document.getElementById('favorites').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function renderFavorites() {
+    try {
+      const { data, error } = await _supabase
+        .from('favorites')
+        .select('*')
+        .eq('user_id', currentUser.id);
+
+      if (error) throw error;
+
+      const grid = document.getElementById('favoritesGrid');
+      const noFavoritesMsg = document.getElementById('noFavoritesMessage');
+
+      if (!data || data.length === 0) {
+        grid.innerHTML = '';
+        noFavoritesMsg.style.display = 'block';
+        return;
+      }
+
+      noFavoritesMsg.style.display = 'none';
+
+      // Get full product details for favorites
+      const { data: products } = await _supabase.from('products').select('*');
+      const favoriteProducts = data.map(fav => {
+        const product = products.find(p => p.id === fav.product_id);
+        return product ? { ...product, favoriteId: fav.id } : null;
+      }).filter(Boolean);
+
+      grid.innerHTML = favoriteProducts.map(p => `
+        <div class="product-card">
+          <div class="product-img">
+            <span>${p.emoji || '📦'}</span>
+            <button class="favorite-btn favorited" data-product-id="${p.id}" onclick="toggleLike('${p.id}', '${p.name.replace(/'/g, "\\'")}', '${p.emoji}')" title="Remove from favorites">❤️</button>
+            ${p.badge ? `<div class="product-badge">${p.badge}</div>` : ''}
+          </div>
+          <div class="product-info">
+            <div class="product-name">${p.name}</div>
+            <div class="product-meta">${p.unit || 'Packed snack'}</div>
+            <div class="product-footer">
+              <div class="product-price">₹${p.price}</div>
+              <button class="add-btn" onclick="addToCart('${p.id}', '${p.name.replace(/'/g, "\\'")}', ${p.price}, this)" title="Add to cart">+</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+    } catch (e) {
+      console.error('Error rendering favorites:', e);
+      showToast('❌ Error loading favorites');
+    }
   }
 
   // Apply theme
@@ -1509,6 +1629,7 @@
       <div class="product-card">
         <div class="product-img">
           <span>${p.emoji || '📦'}</span>
+          <button class="favorite-btn" data-product-id="${p.id}" onclick="toggleLike('${p.id}', '${p.name.replace(/'/g, "\\'")}', '${p.emoji}')" title="Toggle favorite">🤍</button>
           ${p.badge ? `<div class="product-badge">${p.badge}</div>` : ''}
         </div>
         <div class="product-info">
@@ -1516,14 +1637,14 @@
           <div class="product-meta">${p.unit || 'Packed snack'}</div>
           <div class="product-footer">
             <div class="product-price">₹${p.price}</div>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <button onclick="toggleLike('${p.id}', '${p.name}', '${p.emoji}')" style="background:none; border:none; cursor:pointer; font-size:1.1rem;" title="Like">❤️</button>
-              <button class="add-btn" onclick="addToCart('${p.id}', '${p.name}', ${p.price}, this)" title="Add to cart">+</button>
-            </div>
+            <button class="add-btn" onclick="addToCart('${p.id}', '${p.name.replace(/'/g, "\\'")}', ${p.price}, this)" title="Add to cart">+</button>
           </div>
         </div>
       </div>
     `).join('');
+
+    // Update favorite button states after rendering
+    updateFavoriteButtons();
   }
 
   function renderCategories(categories) {
@@ -2139,15 +2260,47 @@ Total: ₹${total}`;
 
 
   async function toggleLike(productId, productName, emoji) {
-    if (!currentUser) return showToast("❌ Login to like items!");
+    if (!currentUser) {
+      showToast("❌ Login to favorite items!");
+      openAuthModal();
+      return;
+    }
 
-    const { data, error } = await _supabase
-        .from('favorites')
-        .upsert([{ user_id: currentUser.id, product_id: productId, product_name: productName, emoji: emoji }]);
+    const isCurrentlyFavorited = userFavorites.includes(productId);
 
-    if (error) showToast("❌ Error saving favorite");
-    else showToast(`❤️ Added ${productName} to favorites!`);
-}
+    try {
+      if (isCurrentlyFavorited) {
+        // Remove from favorites
+        const { error } = await _supabase
+          .from('favorites')
+          .delete()
+          .eq('user_id', currentUser.id)
+          .eq('product_id', productId);
+
+        if (error) throw error;
+
+        // Remove from local array
+        userFavorites = userFavorites.filter(id => id !== productId);
+        showToast(`💔 Removed ${productName} from favorites`);
+      } else {
+        // Add to favorites
+        const { error } = await _supabase
+          .from('favorites')
+          .insert([{ user_id: currentUser.id, product_id: productId, product_name: productName, emoji: emoji }]);
+
+        if (error) throw error;
+
+        // Add to local array
+        userFavorites.push(productId);
+        showToast(`❤️ Added ${productName} to favorites!`);
+      }
+
+      updateFavoriteButtons();
+    } catch (e) {
+      console.error('Error toggling favorite:', e);
+      showToast("❌ Error updating favorites");
+    }
+  }
 </script>
 </body>
 </html>
