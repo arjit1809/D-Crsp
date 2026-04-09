@@ -132,7 +132,7 @@ app.get('/api/eta', (req, res) => {
 app.get('/api/themes', (req, res) => res.json({ success: true, data: themeConfig }));
 
 // Serve frontend
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'frontend.html')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => {
   console.log(`Dá Crsp running on http://localhost:${PORT}`);
